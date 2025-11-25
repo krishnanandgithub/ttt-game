@@ -1,0 +1,42 @@
+// Prisma schema for Tic-Tac-Toe
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Player {
+  id        Int     @id @default(autoincrement())
+  username  String  @unique
+  createdAt DateTime @default(now())
+  gamesX    Game[]  @relation("PlayerX")
+  gamesO    Game[]  @relation("PlayerO")
+  moves     Move[]
+}
+
+model Game {
+  id         Int     @id @default(autoincrement())
+  createdAt  DateTime @default(now())
+  board      String
+  nextTurn   String
+  status     String
+  playerXId  Int?
+  playerOId  Int?
+  playerX    Player? @relation("PlayerX", fields: [playerXId], references: [id])
+  playerO    Player? @relation("PlayerO", fields: [playerOId], references: [id])
+  moves      Move[]
+}
+
+model Move {
+  id        Int     @id @default(autoincrement())
+  index     Int
+  mark      String
+  createdAt DateTime @default(now())
+  gameId    Int
+  playerId  Int?
+  game      Game    @relation(fields: [gameId], references: [id])
+  player    Player? @relation(fields: [playerId], references: [id])
+}

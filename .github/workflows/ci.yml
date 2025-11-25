@@ -22,9 +22,10 @@ jobs:
         with:
           node-version: 18
           cache: 'npm'
+          cache-dependency-path: '${{ matrix.package }}/package-lock.json'
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
         working-directory: ${{ matrix.package }}
 
       - name: Run tests

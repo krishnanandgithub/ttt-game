@@ -5,6 +5,7 @@ import http from 'http';
 import cors from 'cors';
 import { Server, Socket as IOSocket } from 'socket.io';
 import checkMove from './game/checkMove';
+import { PrismaClient } from '@prisma/client';
 
 const PORT = process.env.PORT || 4000;
 
@@ -37,6 +38,33 @@ type UserSettings = {
   palette?: string;
 };
 const userSettings = new Map<string, UserSettings>();
+
+// Prisma client for persistent storage (optional, falls back to in-memory)
+const prisma = new PrismaClient();
+
+async function getSettingsFromDb(username: string): Promise<UserSettings | null> {
+  try {
+    const u = await (prisma as any).user.findUnique({ where: { username } });
+    if (!u) return null;
+    return { username: u.username, mode: u.mode as any, palette: u.palette as any };
+  } catch (e) {
+    console.error('getSettingsFromDb error for', username, e);
+    return null;
+  }
+}
+
+async function upsertSettingsToDb(s: UserSettings) {
+  try {
+    await (prisma as any).user.upsert({
+      where: { username: s.username },
+      update: { mode: s.mode ?? undefined, palette: s.palette ?? undefined },
+      create: { username: s.username, mode: s.mode ?? undefined, palette: s.palette ?? undefined },
+    });
+    console.log('upsertSettingsToDb success for', s.username);
+  } catch (e) {
+    console.error('upsertSettingsToDb error for', s.username, e);
+  }
+}
 
 function createEmptyBoard() {
   return '---------';
@@ -94,11 +122,12 @@ io.on('connection', socketRaw => {
   const socket = socketRaw as GameSocket;
   console.log('Socket connected:', socket.id);
 
-  socket.on('join', (payload: any) => {
+  socket.on('join', async (payload: any) => {
     const username = payload && payload.username ? String(payload.username) : 'anon';
     console.log(`join received from ${socket.id} username=${username}`);
     socket.username = username;
-    const settings = userSettings.get(username) || null;
+    const dbSettings = await getSettingsFromDb(username);
+    const settings = dbSettings || userSettings.get(username) || null;
     socket.emit('settings', settings);
     waitingQueue.push(socket);
     socket.emit('joined', { message: 'waiting' });
@@ -136,7 +165,7 @@ io.on('connection', socketRaw => {
     }
   });
 
-  socket.on('saveSettings', (payload: any) => {
+  socket.on('saveSettings', async (payload: any) => {
     try {
       const username = (payload && payload.username) || socket.username || null;
       if (!username) return;
@@ -147,6 +176,8 @@ io.on('connection', socketRaw => {
       };
       userSettings.set(username, s);
       socket.username = username;
+      // persist to DB asynchronously
+      upsertSettingsToDb(s);
       socket.emit('settings', s);
       socket.emit('settingsSaved', { ok: true });
     } catch (err) {
@@ -206,20 +237,27 @@ server.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);
 });
 
-app.post('/settings', (req, res) => {
+app.post('/settings', async (req, res) => {
   try {
     const { username, mode, palette } = req.body || {};
     if (!username) return res.status(400).json({ error: 'username required' });
     const s: UserSettings = { username, mode, palette };
     userSettings.set(username, s);
+    // persist to DB if available
+    await upsertSettingsToDb(s);
     return res.json({ ok: true });
   } catch (err) {
     return res.status(500).json({ error: 'server error' });
   }
 });
 
-app.get('/settings/:username', (req, res) => {
+app.get('/settings/:username', async (req, res) => {
   const username = String(req.params.username || '');
-  const s = userSettings.get(username) || null;
-  return res.json(s);
+  try {
+    const db = await getSettingsFromDb(username);
+    const s = db || userSettings.get(username) || null;
+    return res.json(s);
+  } catch (err) {
+    return res.status(500).json({ error: 'server error' });
+  }
 });

@@ -24,9 +24,13 @@ jobs:
 
       - name: Install dependencies
         working-directory: ${{ matrix.package }}
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: npm ci
 
       - name: Run tests
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
           if [ "${{ matrix.package }}" = "backend" ]; then
             npm test || echo "No backend tests or tests failed";
